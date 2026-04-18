@@ -274,6 +274,81 @@ def compute_csi(sloos_ci, sloos_cc, chargeoff, cons_del, auto_del, cp_chg):
     return total, level, comps
  
  
+def compute_gci(dxy_surge, em_sov, global_pmi, china_ci, eu_bank):
+    """Global Contagion Index — 0-100 composite of global stress."""
+    def score(val, h, s, st, cr, inv=False):
+        if inv:
+            if val >= h: return 10
+            elif val >= s: return 10 + (h-val)/(h-s)*30
+            elif val >= st: return 40 + (s-val)/(s-st)*30
+            elif val >= cr: return 70 + (st-val)/(st-cr)*25
+            else: return 95
+        else:
+            if val <= h: return 10
+            elif val <= s: return 10 + (val-h)/(s-h)*30
+            elif val <= st: return 40 + (val-s)/(st-s)*30
+            elif val <= cr: return 70 + (val-st)/(cr-st)*25
+            else: return 95
+ 
+    comps = {
+        'dxy_surge': score(dxy_surge, -5, 3, 8, 15),
+        'em_sov': score(em_sov, 300, 400, 600, 900),
+        'global_pmi': score(global_pmi, 52, 50.5, 49, 45, inv=True),
+        'china_ci': score(china_ci, 2, 0, -2, -5, inv=True),
+        'eu_bank': score(eu_bank, 35, 50, 70, 90),
+    }
+    weights = {'dxy_surge': 0.20, 'em_sov': 0.20, 'global_pmi': 0.25,
+               'china_ci': 0.15, 'eu_bank': 0.20}
+    total = sum(comps[k] * weights[k] for k in weights)
+    level = 'CRISIS' if total >= 70 else 'STRESSED' if total >= 50 else 'SOFTENING' if total >= 30 else 'CALM'
+    return total, level, comps
+ 
+ 
+def compute_cfhi(real_inc, savings, tdsp, cc_util, cc_del, retail):
+    """Consumer Financial Health Index — 0-100 trifecta phase detector."""
+    def score(val, h, s, st, cr, inv=False):
+        if inv:
+            if val >= h: return 10
+            elif val >= s: return 10 + (h-val)/(h-s)*30
+            elif val >= st: return 40 + (s-val)/(s-st)*30
+            elif val >= cr: return 70 + (st-val)/(st-cr)*25
+            else: return 95
+        else:
+            if val <= h: return 10
+            elif val <= s: return 10 + (val-h)/(s-h)*30
+            elif val <= st: return 40 + (val-s)/(st-s)*30
+            elif val <= cr: return 70 + (val-st)/(cr-st)*25
+            else: return 95
+ 
+    comps = {
+        'real_inc': score(real_inc, 2.5, 1.5, 0.0, -2.0, inv=True),
+        'savings': score(savings, 6.0, 4.5, 3.0, 2.0, inv=True),
+        'tdsp': score(tdsp, 9.5, 10.5, 11.5, 13.0),
+        'cc_util': score(cc_util, 22, 26, 30, 38),
+        'cc_del': score(cc_del, 2.5, 3.2, 4.0, 5.5),
+        'retail': score(retail, 3.0, 1.5, 0.0, -3.0, inv=True),
+    }
+    weights = {'real_inc': 0.20, 'savings': 0.15, 'tdsp': 0.15,
+               'cc_util': 0.20, 'cc_del': 0.15, 'retail': 0.15}
+    total = sum(comps[k] * weights[k] for k in weights)
+ 
+    # Phase identification
+    if retail <= 0 and cc_del >= 4.0 and savings <= 3.0:
+        phase = "PHASE 3 — SPENDING CRACKED"
+        phase_desc = "Recession dynamics active"
+    elif total >= 55:
+        phase = "LATE PHASE 2 — BRIDGE STRESSED"
+        phase_desc = "Phase 3 imminent if no relief"
+    elif total >= 30:
+        phase = "PHASE 2 — CREDIT BRIDGE"
+        phase_desc = "Spending via credit, watch for snap"
+    else:
+        phase = "PHASE 1 — HEALTHY"
+        phase_desc = "Consumer buffer intact, recession unlikely"
+ 
+    return total, phase, phase_desc, comps
+ 
+ 
 # ══════════════════════════════════════════════════════════════
 # SIDEBAR — INDICATOR CONTROLS
 # ══════════════════════════════════════════════════════════════
@@ -323,6 +398,23 @@ with st.sidebar:
     csi_auto_del = st.slider("Auto delinq 60+d (%)", 1.0, 4.0, 3.3, 0.1, help="Auto loans 60+ days delinquent")
     csi_cp_chg = st.slider("Commercial paper YoY (%)", -30.0, 20.0, -5.0, 1.0, help="YoY change in commercial paper outstanding")
  
+    st.markdown("---")
+    st.markdown("### 🌍 GCI Inputs")
+    gci_dxy_surge = st.slider("USD 6m change (%)", -15.0, 20.0, -5.0, 0.5, help="Dollar surge = safe haven flight")
+    gci_em_sov = st.slider("EM sovereign spread (bps)", 150, 1500, 280, 10, help="EM stress gauge")
+    gci_global_pmi = st.slider("Global manuf PMI", 40.0, 60.0, 49.1, 0.1, help="Below 50 = contraction")
+    gci_china_ci = st.slider("China credit impulse (pp)", -8.0, 10.0, -2.0, 0.5, help="Negative = China dragging global")
+    gci_eu_bank = st.slider("EU bank stress (0-100)", 20, 100, 55, 1, help="Cross-Atlantic contagion channel")
+ 
+    st.markdown("---")
+    st.markdown("### 👤 CFHI Inputs")
+    cfhi_real_inc = st.slider("Real disposable income YoY (%)", -5.0, 8.0, 1.2, 0.1, help="Real income growth")
+    cfhi_savings = st.slider("Personal savings rate (%)", 1.0, 15.0, 3.8, 0.1, help="Household savings buffer")
+    cfhi_tdsp = st.slider("Debt service ratio (%)", 8.0, 15.0, 11.4, 0.1, help="% of income going to debt")
+    cfhi_cc_util = st.slider("CC utilization (%)", 15, 45, 29, 1, help="Credit bridge usage")
+    cfhi_cc_del = st.slider("CC delinquency 90+d (%)", 1.0, 8.0, 2.94, 0.05, help="Bridge breaking signal")
+    cfhi_retail = st.slider("Real retail sales YoY (%)", -10.0, 10.0, 1.8, 0.2, help="Actual spending")
+ 
 # ══════════════════════════════════════════════════════════════
 # MAIN CONTENT
 # ══════════════════════════════════════════════════════════════
@@ -352,6 +444,13 @@ lsi_total, lsi_level, lsi_comps = compute_lsi(lsi_hours, lsi_quits, lsi_temp, ls
 # CSI
 csi_total, csi_level, csi_comps = compute_csi(csi_sloos_ci, csi_sloos_cc, csi_chargeoff, csi_cons_del, csi_auto_del, csi_cp_chg)
  
+# GCI
+gci_total, gci_level, gci_comps = compute_gci(gci_dxy_surge, gci_em_sov, gci_global_pmi, gci_china_ci, gci_eu_bank)
+ 
+# CFHI
+cfhi_total, cfhi_phase, cfhi_phase_desc, cfhi_comps = compute_cfhi(cfhi_real_inc, cfhi_savings, cfhi_tdsp, cfhi_cc_util, cfhi_cc_del, cfhi_retail)
+cfhi_short = cfhi_phase.split(" —")[0] if " —" in cfhi_phase else cfhi_phase.split(" -")[0]
+ 
 # Divergence
 csi_norm = csi_total / 100
 hy_fire = current[4]
@@ -364,17 +463,21 @@ else:
     div_status, div_color = "MARKET LEADING", "#c8a84a"
  
 # ── HERO METRICS ──
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
 with col1:
-    st.metric("ML Probability", f"{ml_p*100:.0f}%", f"Agreement: {agreement*100:.0f}%")
+    st.metric("ML Prob", f"{ml_p*100:.0f}%", f"Agree {agreement*100:.0f}%")
 with col2:
-    st.metric("Judgment", f"{j_p*100:.0f}%", f"Weighted by expert views")
+    st.metric("Judgment", f"{j_p*100:.0f}%", "Expert weights")
 with col3:
-    st.metric("Labor Stress", f"{lsi_total:.0f}/100", lsi_level)
+    st.metric("Labor (LSI)", f"{lsi_total:.0f}/100", lsi_level)
 with col4:
-    st.metric("Credit Stress", f"{csi_total:.0f}/100", csi_level)
+    st.metric("Credit (CSI)", f"{csi_total:.0f}/100", csi_level)
 with col5:
-    st.metric("HY OAS Fire", f"{current[4]*100:.0f}%", "Market price")
+    st.metric("Global (GCI)", f"{gci_total:.0f}/100", gci_level)
+with col6:
+    st.metric("Consumer (CFHI)", f"{cfhi_total:.0f}/100", cfhi_short)
+with col7:
+    st.metric("HY OAS", f"{current[4]*100:.0f}%", "Market fire")
  
 st.markdown(f"<div style='padding:16px;background:{cls_color}22;border-left:4px solid {cls_color};border-radius:8px;margin:16px 0'>"
             f"<h3 style='color:{cls_color};margin:0'>{cls_name}</h3>"
@@ -400,13 +503,17 @@ st.caption(f"Bootstrap 90% CI: {bs['p5']*100:.0f}% — {bs['p95']*100:.0f}% | Me
 # TABS
 # ══════════════════════════════════════════════════════════════
  
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
     "📈 Dashboard",
     "🎯 Action Plan",
     "🔮 Scenarios",
     "🧠 ML Engine",
     "👷 Labor Stress",
     "🏦 Credit Stress",
+    "🌍 Global",
+    "👤 Consumer",
+    "🛢️ Pipe 1: Foreign Funding",
+    "🔧 Pipe 2: Shadow Banking",
     "ℹ️ About"
 ])
  
@@ -692,8 +799,811 @@ with tab6:
     Historically, ground-level data has always been right — markets catch up eventually.
     """)
  
-# ── TAB 7: ABOUT ──
+# ── TAB 7: GLOBAL ──
 with tab7:
+    st.header(f"Global Contagion Index — {gci_total:.0f}/100")
+ 
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        gci_color = '#d4614a' if gci_level in ('CRISIS', 'STRESSED') else '#c8a84a' if gci_level == 'SOFTENING' else '#8fb840'
+        st.markdown(f"<div style='padding:20px;background:{gci_color}22;border-radius:12px;text-align:center'>"
+                    f"<h1 style='color:{gci_color};margin:0'>{gci_total:.0f}</h1>"
+                    f"<h3 style='color:{gci_color};margin:4px 0'>{gci_level}</h3></div>",
+                    unsafe_allow_html=True)
+    with col2:
+        st.markdown("#### The dimension our US-focused model misses")
+        st.markdown(f"""
+        - **40% of S&P 500 revenue** is international — we ignore this channel
+        - In 2008, European bank failures amplified US problems
+        - In 1997, Asian crisis nearly caused US recession
+        - In 2010-11, Greek debt triggered US correction
+        - Average lag from global stress to US market reaction: **3-6 months**
+        """)
+ 
+    st.markdown("### Component Breakdown")
+    gci_labels = {
+        'dxy_surge': ('USD 6m change', gci_dxy_surge, '%', 'Surge = safe haven flight = global stress'),
+        'em_sov': ('EM sovereign spread', gci_em_sov, 'bps', 'Widening = EM economies cracking'),
+        'global_pmi': ('Global manuf PMI', gci_global_pmi, '', 'Below 50 = global contraction'),
+        'china_ci': ('China credit impulse', gci_china_ci, 'pp', 'Negative = China dragging global growth'),
+        'eu_bank': ('EU bank stress', gci_eu_bank, '/100', 'Cross-Atlantic contagion channel'),
+    }
+    gdf = pd.DataFrame([
+        {'Component': v[0], 'Value': f"{v[1]}{v[2]}", 'Stress': f"{gci_comps[k]:.0f}/100", 'Why': v[3]}
+        for k, v in gci_labels.items()
+    ])
+    st.dataframe(gdf, use_container_width=True, hide_index=True)
+ 
+    st.markdown("### Historical Comparison")
+    hist_gci = pd.DataFrame([
+        {'Date': '2007-10', 'GCI': 28, 'Outcome': 'PRE-GFC (global calm, US cracked first)'},
+        {'Date': '2025-02', 'GCI': 38, 'Outcome': 'Current cycle peak'},
+        {'Date': 'NOW', 'GCI': gci_total, 'Outcome': 'CURRENT READING'},
+        {'Date': '2018-12', 'GCI': 42, 'Outcome': 'Fed tight + trade war (correction)'},
+        {'Date': '2015-12', 'GCI': 58, 'Outcome': 'China devaluation (correction)'},
+        {'Date': '2001-09', 'GCI': 62, 'Outcome': 'Post dot-com (RECESSION)'},
+        {'Date': '2011-08', 'GCI': 65, 'Outcome': 'EU debt crisis (correction)'},
+        {'Date': '2022-10', 'GCI': 72, 'Outcome': 'UK gilt + EU energy (correction)'},
+        {'Date': '1998-08', 'GCI': 78, 'Outcome': 'LTCM + Asia (correction)'},
+        {'Date': '2020-03', 'GCI': 85, 'Outcome': 'COVID shock (RECESSION)'},
+        {'Date': '2008-09', 'GCI': 97, 'Outcome': 'GFC (RECESSION)'},
+    ])
+    st.dataframe(hist_gci.sort_values('GCI'), use_container_width=True, hide_index=True)
+ 
+    st.markdown("### Key Insights")
+ 
+    st.warning("""
+    **The unusual dollar behaviour:** Dollar is DECLINING (-5% 6m) during Iran war
+    and geopolitical stress. Normally Middle East tension = dollar surge (safe haven bid).
+    The fact that DXY is WEAKENING suggests investors are starting to question US assets
+    as the ultimate safe haven. This is a structural shift worth watching carefully —
+    it's the first time in 40+ years this pattern has appeared during a major geopolitical event.
+    """)
+ 
+    st.info("""
+    **The 2007 contrast:** Pre-GFC, GCI was 28 (global was calm). US cracked FIRST,
+    global contagion followed. Today GCI is ~41 — global is ALREADY softening.
+    If US cracks this cycle, contagion will be faster because global economy has
+    less absorptive capacity. 2007's "world as shock absorber" scenario is not available now.
+    """)
+ 
+    st.markdown("### Full Integrated Picture")
+    integrated = pd.DataFrame([
+        {'Layer': 'Market (ML model)', 'Reading': f"{ml_p*100:.0f}%", 'Assessment': 'Low risk'},
+        {'Layer': 'Market (HY OAS)', 'Reading': f"{hy_fire*100:.0f}% fire", 'Assessment': 'Calm'},
+        {'Layer': 'Fundamental (LSI)', 'Reading': f"{lsi_total:.0f}/100", 'Assessment': lsi_level},
+        {'Layer': 'Fundamental (CSI)', 'Reading': f"{csi_total:.0f}/100", 'Assessment': csi_level},
+        {'Layer': 'Global (GCI)', 'Reading': f"{gci_total:.0f}/100", 'Assessment': gci_level},
+    ])
+    st.dataframe(integrated, use_container_width=True, hide_index=True)
+ 
+    if lsi_total >= 50 and csi_total >= 45 and gci_total >= 30:
+        st.error("""
+        **Three-dimensional stress confirmed.** Labor stressed + Credit tightening + Global softening.
+        This is the first time in our dataset all three ground-level sensors are above
+        "softening" thresholds while market data shows low stress. Historically unprecedented
+        divergence between fundamentals and market pricing.
+        """)
+ 
+# ── TAB 8: CONSUMER ──
+with tab8:
+    st.header(f"Consumer Financial Health Index — {cfhi_total:.0f}/100")
+ 
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        phase_color = '#d4614a' if 'PHASE 3' in cfhi_phase or 'LATE PHASE 2' in cfhi_phase else '#c8a84a' if 'PHASE 2' in cfhi_phase else '#8fb840'
+        st.markdown(f"<div style='padding:20px;background:{phase_color}22;border-radius:12px;text-align:center'>"
+                    f"<h1 style='color:{phase_color};margin:0'>{cfhi_total:.0f}</h1>"
+                    f"<h4 style='color:{phase_color};margin:4px 0'>{cfhi_phase}</h4></div>",
+                    unsafe_allow_html=True)
+    with col2:
+        st.markdown("#### The trifecta framework, quantified")
+        st.markdown(f"""
+        - **Phase 1** (0-30): Feel bad, spend fine — buffer intact
+        - **Phase 2** (30-55): Feel bad, spend on credit — bridge active
+        - **Late Phase 2** (55-75): Bridge stressed — Phase 3 imminent
+        - **Phase 3** (75-100): Spending snapped — recession trigger
+ 
+        **Current: {cfhi_phase}**
+        {cfhi_phase_desc}
+        """)
+ 
+    st.markdown("### Component Breakdown")
+    cfhi_labels = {
+        'real_inc': ('Real disposable income YoY', f"{cfhi_real_inc:+.1f}%", 'Are people actually getting richer?'),
+        'savings': ('Personal savings rate', f"{cfhi_savings:.1f}%", 'Below 4% = no cushion left'),
+        'tdsp': ('Debt service ratio', f"{cfhi_tdsp:.1f}%", 'Share of income going to debt'),
+        'cc_util': ('CC utilization', f"{cfhi_cc_util}%", 'Credit bridge usage'),
+        'cc_del': ('CC delinquency 90+d', f"{cfhi_cc_del:.2f}%", 'Bridge actually breaking'),
+        'retail': ('Real retail sales YoY', f"{cfhi_retail:+.1f}%", 'Negative = Phase 3 confirmed'),
+    }
+    cfhidf = pd.DataFrame([
+        {'Component': v[0], 'Value': v[1], 'Stress': f"{cfhi_comps[k]:.0f}/100", 'Why': v[2]}
+        for k, v in cfhi_labels.items()
+    ])
+    st.dataframe(cfhidf, use_container_width=True, hide_index=True)
+ 
+    # Snap signals
+    snap_signals = []
+    if cfhi_savings < 3.5:
+        snap_signals.append(f"Savings rate {cfhi_savings:.1f}% — below healthy 4%")
+    if cfhi_cc_util > 28:
+        snap_signals.append(f"CC utilization {cfhi_cc_util}% — bridge stretched")
+    if cfhi_cc_del > 3.0:
+        snap_signals.append(f"CC delinq {cfhi_cc_del:.2f}% — bridge cracking")
+    if cfhi_real_inc < 1.5:
+        snap_signals.append(f"Real income +{cfhi_real_inc:.1f}% — barely growing")
+    if cfhi_retail < 2.0:
+        snap_signals.append(f"Retail sales +{cfhi_retail:.1f}% — decelerating")
+ 
+    if snap_signals:
+        st.markdown("### Snap Signals (Leading Indicators of Phase 3)")
+        for sig in snap_signals:
+            st.markdown(f"- {sig}")
+ 
+    st.markdown("### Historical Comparison")
+    hist_cfhi = pd.DataFrame([
+        {'Date': '2020-02', 'CFHI': 10, 'Phase': 'Phase 1 healthy', 'Outcome': 'Then COVID shock'},
+        {'Date': '2018-09', 'CFHI': 12, 'Phase': 'Phase 1 healthy', 'Outcome': 'CORRECTION'},
+        {'Date': '2022-01', 'CFHI': 20, 'Phase': 'Phase 1 buffered', 'Outcome': 'CORRECTION'},
+        {'Date': '2000-03', 'CFHI': 28, 'Phase': 'Phase 1-2 transit', 'Outcome': 'Then RECESSION'},
+        {'Date': '2011-04', 'CFHI': 32, 'Phase': 'Phase 2 post-GFC', 'Outcome': 'CORRECTION'},
+        {'Date': '2025-02', 'CFHI': 42, 'Phase': 'Phase 2 bridge', 'Outcome': 'Current cycle peak'},
+        {'Date': 'NOW', 'CFHI': cfhi_total, 'Phase': cfhi_short, 'Outcome': 'CURRENT'},
+        {'Date': '2001-09', 'CFHI': 58, 'Phase': 'Phase 2-3 transit', 'Outcome': 'RECESSION'},
+        {'Date': '2007-10', 'CFHI': 62, 'Phase': 'Late Phase 2', 'Outcome': 'Then GFC'},
+        {'Date': '2008-09', 'CFHI': 88, 'Phase': 'Phase 3 cracked', 'Outcome': 'CRISIS'},
+    ])
+    st.dataframe(hist_cfhi.sort_values('CFHI'), use_container_width=True, hide_index=True)
+ 
+    st.warning("""
+    **The K-Shaped Hidden Reality:** Headline CC delinquency 2.94% has been FALLING for
+    6 quarters. This looks healthy. Reality: tighter underwriting since 2023 means banks
+    stopped lending to risky borrowers — the drop is because fewer risky borrowers have cards,
+    not because borrowers got healthier. In low-income zip codes, delinquency is rising.
+    Per Achieve February 2026 survey: **55% of credit card balances fund essentials**
+    (groceries, rent, utilities). That IS the Phase 2 bridge mechanism.
+    """)
+ 
+    st.error("""
+    **Phase 3 Triggers to Watch:**
+    - Real retail sales turning **negative** (currently +1.8%)
+    - CC delinquency 90+d crossing **4.0%** (currently 2.94% but K-shaped)
+    - Savings rate falling below **3.0%** (currently 3.8%)
+    - All three = spending snap confirmed = recession trigger
+    """)
+ 
+    st.markdown("### Full Five-Dimensional Picture")
+    full_picture = pd.DataFrame([
+        {'Layer': 'Market (ML model)', 'Reading': f"{ml_p*100:.0f}%", 'Signal': 'Low risk'},
+        {'Layer': 'Market (HY OAS)', 'Reading': f"{hy_fire*100:.0f}% fire", 'Signal': 'Calm'},
+        {'Layer': 'Fundamental (LSI)', 'Reading': f"{lsi_total:.0f}/100", 'Signal': lsi_level},
+        {'Layer': 'Fundamental (CSI)', 'Reading': f"{csi_total:.0f}/100", 'Signal': csi_level},
+        {'Layer': 'Global (GCI)', 'Reading': f"{gci_total:.0f}/100", 'Signal': gci_level},
+        {'Layer': 'Consumer (CFHI)', 'Reading': f"{cfhi_total:.0f}/100", 'Signal': cfhi_short},
+    ])
+    st.dataframe(full_picture, use_container_width=True, hide_index=True)
+ 
+# ── TAB 9: PIPE 1 — FOREIGN FUNDING (Petrodollar / SWF) ──
+with tab9:
+    st.header("🛢️ Structural Vulnerability Map")
+    st.markdown("### Pipe 1: Foreign Funding (Petrodollar / SWF)")
+ 
+    st.markdown("""
+    <div style='padding:14px;background:#261f14;border-left:4px solid #c8a84a;border-radius:8px;margin:8px 0'>
+    <strong style='color:#c8a84a'>The "Two Elephants on a Seesaw" pipe.</strong><br>
+    <span style='color:#b09a6e'>Net capital flows US↔world look balanced.
+    Gross flows reveal massive dependency: $6T+ in SWF wealth, $250B Gulf Treasury holdings,
+    $1.5T Japanese dollar assets, all supporting US asset prices and Treasury yields.<br><br>
+    If allocation shifts even 10-15%, the bid for Treasuries disappears and long rates rise
+    independent of the Fed. This is the 2026 transnational flow analog to 2007 European bank flows.</span>
+    </div>
+    """, unsafe_allow_html=True)
+ 
+    # Pipe 1 indicators (hardcoded current readings)
+    pipe1_indicators = [
+        {
+            "key": "gulf_swf",
+            "label": "Gulf SWF US asset concentration",
+            "value": 65, "unit": "/100",
+            "thresholds": [40, 55, 70, 85, 95],
+            "invert": False,
+            "ref_2007": "European bank SIV conduit exposure",
+            "why": "Gulf SWFs hold $6T globally. $250B+ in US Treasuries, plus hundreds of billions in equities, real estate, PC, tech. Own ~40% of prime US commercial real estate in key metros. A 20-30% allocation pivot toward Asia exceeds 2014-16 Saudi reserve drawdown that moved Treasury term premium measurably.",
+        },
+        {
+            "key": "saudi_china",
+            "label": "Saudi oil exports to China",
+            "value": 30, "unit": "%",
+            "thresholds": [15, 22, 28, 35, 45],
+            "invert": False,
+            "ref_2007": "(No 2007 analog — new risk dimension)",
+            "why": "Saudi now sells 4x MORE oil to China than to US. Physical trade leads capital flows. The 1974 Kissinger equation (US security → Saudi USD pricing → Treasury purchases) under pressure for first time since 1974.",
+        },
+        {
+            "key": "dxy_stress",
+            "label": "DXY during geopolitical stress",
+            "value": -5.0, "unit": "%",
+            "thresholds": [3, 0, -3, -6, -10],
+            "invert": True,
+            "ref_2007": "USD strengthened during 2007 stress (normal pattern)",
+            "why": "CRITICAL SIGNAL. Dollar FALLEN 5% during Iran war. Unprecedented — in 1990, 2001, 2008, 2020, 2022, USD surged as safe haven. Falling during stress = foreign capital already questioning US safe-haven status. An observation of current behavior that has no historical parallel.",
+        },
+        {
+            "key": "pif_commitments",
+            "label": "Saudi PIF new US commitments",
+            "value": -70, "unit": "%",
+            "thresholds": [0, -15, -35, -55, -75],
+            "invert": True,
+            "ref_2007": "ABCP issuance decline mid-2007",
+            "why": "Saudi PIF cut NEW US commitments by 70% in early 2024. Existing holdings intact, marginal flow diverted. EXACT 2007 ABCP pattern: existing conduits kept running but new issuance collapsed. Marginal buyer disappears before existing holder sells.",
+        },
+        {
+            "key": "jp_hedging",
+            "label": "Japanese Treasury hedging cost",
+            "value": 6.8, "unit": "%",
+            "thresholds": [2, 3.5, 5, 7, 10],
+            "invert": False,
+            "ref_2007": "Swap spread widening Aug 2007",
+            "why": "Japanese insurers hold $1.5T dollar assets. At 6.8% hedging cost vs ~4.2% Treasury yield, HEDGED holdings yield NEGATIVE. Mechanical unwind in progress. No political decision required — just math.",
+        },
+        {
+            "key": "em_gold",
+            "label": "EM central bank gold accumulation",
+            "value": 75, "unit": "/100",
+            "thresholds": [25, 45, 65, 80, 95],
+            "invert": False,
+            "ref_2007": "(No 2007 analog)",
+            "why": "EM central banks bought RECORD gold 2022-2025. Every ounce of gold is a dollar reserve NOT bought. Driven by weaponization fear (Russia $300B frozen 2022). Silent, structural — no announcement required.",
+        },
+        {
+            "key": "tic_flow",
+            "label": "Foreign Treasury demand trend",
+            "value": 35, "unit": "/100",
+            "thresholds": [70, 55, 40, 25, 15],
+            "invert": True,
+            "ref_2007": "MMF flow into ABCP slowing",
+            "why": "Foreign share of Treasuries declined 34% (2014) → 22% (now). US issuing $2T/yr deficit. Marginal buyer is domestic (MMFs, banks, hedge fund basis trades). Score 35 = weak foreign demand vs massive supply.",
+        },
+        {
+            "key": "shadow_china",
+            "label": "Chinese shadow reserves (off-TIC)",
+            "value": 60, "unit": "/100",
+            "thresholds": [30, 45, 60, 75, 90],
+            "invert": False,
+            "ref_2007": "European SIV exposure (off-balance-sheet)",
+            "why": "Per Brad Setser (CFR): China holds Treasuries off TIC via state banks. Official $780B underestimates true exposure. Structurally identical to 2007: visible subprime $500B, actual $2T+.",
+        },
+    ]
+ 
+    def score_pipe1(value, thresholds, inverted=False):
+        h, w, s, ar, r = thresholds
+        if inverted:
+            if value >= h: return 10
+            elif value >= w: return 10 + (h - value) / (h - w) * 20
+            elif value >= s: return 30 + (w - value) / (w - s) * 20
+            elif value >= ar: return 50 + (s - value) / (s - ar) * 25
+            elif value >= r: return 75 + (ar - value) / (ar - r) * 20
+            else: return 95
+        else:
+            if value <= h: return 10
+            elif value <= w: return 10 + (value - h) / (w - h) * 20
+            elif value <= s: return 30 + (value - w) / (s - w) * 20
+            elif value <= ar: return 50 + (value - s) / (ar - s) * 25
+            elif value <= r: return 75 + (value - ar) / (r - ar) * 20
+            else: return 95
+ 
+    def status_label_p1(score):
+        if score < 30: return "HEALTHY", "#8fb840"
+        elif score < 50: return "WATCH", "#c8a84a"
+        elif score < 70: return "STRESSED", "#d4614a"
+        elif score < 85: return "AT-RISK", "#d4614a"
+        else: return "ACTIVE-RUPTURE", "#d4614a"
+ 
+    for ind in pipe1_indicators:
+        ind["score"] = score_pipe1(ind["value"], ind["thresholds"], ind.get("invert", False))
+        ind["status"], ind["color"] = status_label_p1(ind["score"])
+ 
+    scores = [ind["score"] for ind in pipe1_indicators]
+    max_score = max(scores)
+    mean_score = np.mean(scores)
+    above_75 = sum(1 for s in scores if s >= 75)
+    above_50 = sum(1 for s in scores if s >= 50)
+ 
+    if max_score >= 90:
+        overall_status_p1 = "ACTIVE-RUPTURE"
+        overall_color_p1 = "#d4614a"
+        overall_desc_p1 = "At least one indicator shows active failure mode"
+    elif above_75 >= 2:
+        overall_status_p1 = "AT-RISK"
+        overall_color_p1 = "#d4614a"
+        overall_desc_p1 = "Multiple indicators at rupture threshold — cascade risk"
+    elif above_50 >= 3 or max_score >= 75:
+        overall_status_p1 = "STRESSED"
+        overall_color_p1 = "#d4614a"
+        overall_desc_p1 = "Multiple indicators stressed or one at-risk"
+    elif above_50 >= 1 or mean_score >= 40:
+        overall_status_p1 = "WATCH"
+        overall_color_p1 = "#c8a84a"
+        overall_desc_p1 = "Early warning signals active, not yet rupture-consistent"
+    else:
+        overall_status_p1 = "HEALTHY"
+        overall_color_p1 = "#8fb840"
+        overall_desc_p1 = "Pipe functioning normally"
+ 
+    # Hero status
+    st.markdown(f"""
+    <div style='padding:24px;background:{overall_color_p1}22;border:2px solid {overall_color_p1};border-radius:14px;text-align:center;margin:16px 0'>
+    <div style='color:#b09a6e;font-size:14px;margin-bottom:8px'>OVERALL PIPE STATUS</div>
+    <h1 style='color:{overall_color_p1};margin:0;font-size:42px'>{overall_status_p1}</h1>
+    <div style='color:#b09a6e;margin-top:8px'>{overall_desc_p1}</div>
+    </div>
+    """, unsafe_allow_html=True)
+ 
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Stressed (≥50)", f"{above_50}/8")
+    col2.metric("At-Risk (≥75)", f"{above_75}/8")
+    col3.metric("Max Score", f"{max_score:.0f}/100")
+ 
+    st.markdown("### Indicator Status Table")
+    st.caption("Each indicator captures a specific cross-border funding dependency or early warning signal.")
+ 
+    df = pd.DataFrame([
+        {
+            "Indicator": ind["label"],
+            "Value": f"{ind['value']}{ind['unit']}",
+            "Score": f"{ind['score']:.0f}/100",
+            "Status": ind["status"],
+            "2007 Analog": ind["ref_2007"],
+        }
+        for ind in pipe1_indicators
+    ])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+ 
+    st.markdown("### The Two-Elephants-on-a-Seesaw Insight")
+    st.markdown("""
+    Tooze's central critique of the Hamilton Project was that they measured NET capital flows (which were balanced) instead of GROSS flows (where two massive streams moved in opposite directions). When both elephants pressed down simultaneously in 2008, the seesaw snapped.
+ 
+    **Today's gross flow dependencies:**
+    - US receives ~$1T/year in foreign funding (Treasuries, equities, real estate)
+    - ~$250B+ from Gulf SWFs alone
+    - ~$1.5T stock of Japanese dollar holdings
+    - ~$6T total SWF capacity globally, ~40% dollar-allocated
+    - ~$9.3T total foreign holdings of US Treasuries
+ 
+    **If allocation shifts even 10-15% at the margin**, Treasury yields rise independently of Fed policy.
+    """)
+ 
+    # Detailed reasoning
+    st.markdown("### Why Each Indicator Matters")
+    for ind in pipe1_indicators:
+        with st.expander(f"{ind['label']} — {ind['status']} ({ind['value']}{ind['unit']})"):
+            st.markdown(f"**2007 Equivalent:** {ind['ref_2007']}")
+            st.markdown(f"**Why it matters:** {ind['why']}")
+ 
+    # Transmission mechanisms
+    st.markdown("### Transmission Mechanisms — How a Pipe 1 Rupture Propagates")
+ 
+    with st.expander("🌊 Scenario 1: Gulf SWF Allocation Pivot"):
+        st.markdown("""
+        **Historical analog:** 2014-16 Saudi reserve drawdown ($230B)
+        **Timeline to US consumer:** 6-18 months (slow but structural)
+ 
+        **Sequence:**
+        1. Iran war creates fresh Saudi-China strategic alignment
+        2. Oil continues flowing east, capital follows physical trade
+        3. Gulf SWFs announce 'portfolio diversification' — code for reducing US
+        4. New US commitments frozen; existing positions run off
+        5. At margin, Gulf dollar buying of Treasuries stops
+        6. Treasury auctions see weak bid-to-cover on long end
+        7. Long rates rise 50-100bps without Fed action
+        8. Rising long rates: mortgage rates up, equity multiples compress
+        9. Fed faces choice: cut rates (inflation risk) or let economy cool
+        10. Either path: recession pressure independent of cyclical factors
+        """)
+ 
+    with st.expander("⏱️ Scenario 2: Japanese Insurer Treasury Unwind (Fastest)"):
+        st.markdown("""
+        **Historical analog:** Q4 2022 Japanese insurer selling wave
+        **Timeline to US consumer:** 3-9 months (fastest transmission)
+ 
+        **Sequence:**
+        1. FX hedging cost stays above 5% while yield pickup <3%
+        2. Japanese life insurers accelerate Treasury divestment
+        3. Sold mostly long-duration Treasuries (matching liabilities)
+        4. Term premium rises as Japanese bid disappears
+        5. MBS spreads widen (MBS tracks long Treasuries)
+        6. Mortgage rates rise 30-50bps independent of Fed
+        7. Housing market cools further; CRE refinancing gets harder
+        8. Regional bank CRE losses accelerate (already Pipe 2 stress)
+        """)
+ 
+    with st.expander("💥 Scenario 3: Dollar Confidence Cascade (Unprecedented)"):
+        st.markdown("""
+        **Historical analog:** None — this would be unprecedented
+        **Timeline to US consumer:** 6-24 months, high severity if it happens
+ 
+        **Sequence:**
+        1. Dollar continues weakening despite geopolitical stress (unprecedented pattern)
+        2. Gold continues accumulation by EM central banks
+        3. One major SWF announces reduced dollar allocation
+        4. Other SWFs follow (herding behavior in flows)
+        5. Dollar weakness becomes self-reinforcing trend
+        6. Inflation imported via commodity prices in USD terms
+        7. Fed forced into impossible choice: weak currency or recession
+        8. Either way, negative wealth effect on US consumer
+        9. This is the 'exorbitant privilege' reversal scenario
+        """)
+ 
+    st.markdown("### Who Gets Hit First (Transmission Chain)")
+    transmission_order = [
+        "Long-duration Treasury holders (pension funds, insurers) — **immediate**",
+        "US homebuyers via mortgage rates tracking 10yr — **1-3 months**",
+        "CRE borrowers refinancing in maturity wall — **3-6 months**",
+        "Regional banks with long-duration bond portfolios (SVB 2.0 risk) — **3-9 months**",
+        "Highly leveraged tech/AI companies (duration sensitive) — **6-12 months**",
+        "US consumer via mortgage refinancing and HELOC costs — **6-18 months**",
+    ]
+    for i, target in enumerate(transmission_order, 1):
+        st.markdown(f"{i}. {target}")
+ 
+    st.markdown("### Early Warning Signals to Watch")
+    signals = [
+        "Saudi Treasury holdings (SAMA monthly data) declining sequentially",
+        "TIC data showing foreign net selling for 3+ consecutive months",
+        "Bid-to-cover ratios at 30yr Treasury auctions below 2.3x",
+        "DXY breaking below 92 during active geopolitical stress",
+        "Gold price accelerating above $3,500 without obvious USD-specific trigger",
+        "Any GCC state announcing yuan-denominated oil contracts",
+        "Japanese life insurer monthly reports showing accelerated Treasury sales",
+        "Chinese 'shadow reserve' data showing acceleration in state bank holdings",
+    ]
+    for sig in signals:
+        st.markdown(f"- {sig}")
+ 
+    # Critical asymmetry
+    st.error("""
+    **THE CRITICAL ASYMMETRY — why this pipe is different:**
+ 
+    Unlike Pipe 2 where Fed liquidity support actually helps, Pipe 1 rupture puts the Fed in a **no-win situation**:
+ 
+    The Fed can print dollars to buy Treasuries domestically (YCC — Yield Curve Control is a real option).
+    But that **debases the dollar further**, accelerating the underlying problem.
+ 
+    It's the monetary equivalent of pouring gasoline on a fire.
+ 
+    This is why Pipe 1 deserves separate analysis from the cyclical model — because the traditional crisis playbook doesn't just fail here, it makes things worse.
+    """)
+ 
+    # Combined SVM picture
+    st.markdown("### 🔗 Combined Structural Vulnerability Map")
+ 
+    svm_summary = pd.DataFrame([
+        {"Pipe": "Pipe 1: Foreign Funding", "Status": overall_status_p1,
+         "Key Concern": "PIF commitments -70%, dollar weak during stress"},
+        {"Pipe": "Pipe 2: Shadow Banking", "Status": "STRESSED",
+         "Key Concern": "BDC 17% NAV discount, 40% PC borrowers cashflow-negative"},
+        {"Pipe": "Pipe 3: Market Structure", "Status": "Not yet built",
+         "Key Concern": "Treasury dysfunction, repo stress, dealer capacity"},
+        {"Pipe": "Pipe 4: Geopolitical", "Status": "Not yet built",
+         "Key Concern": "Russia-China-Saudi alignment, currency bloc shifts"},
+    ])
+    st.dataframe(svm_summary, use_container_width=True, hide_index=True)
+ 
+    st.markdown(f"""
+    <div style='padding:16px;background:#261f14;border-left:4px solid #d4614a;border-radius:8px;margin:8px 0'>
+    <strong style='color:#d4614a'>Combined Framework Reading (April 2026):</strong><br><br>
+ 
+    <strong style='color:#f2e8d0'>Recession Radar (cyclical):</strong>
+    <span style='color:#b09a6e'>15-45% probability (market vs fundamentals)</span><br><br>
+ 
+    <strong style='color:#f2e8d0'>Pipe 1 (Foreign Funding):</strong>
+    <span style='color:{overall_color_p1}'>{overall_status_p1}</span><br>
+ 
+    <strong style='color:#f2e8d0'>Pipe 2 (Shadow Banking):</strong>
+    <span style='color:#d4614a'>STRESSED</span><br><br>
+ 
+    <strong style='color:#c8a84a'>Integrated assessment:</strong><br>
+    <span style='color:#b09a6e'>Two structural pipes at severe stress simultaneously. This is the
+    2007-equivalent configuration. Cyclical probability number understates risk because the transmission
+    mechanisms (not the indicators) are loaded.</span>
+    </div>
+    """, unsafe_allow_html=True)
+ 
+    st.caption("Framework inspired by Adam Tooze, *Crashed* (2018). "
+               "Brad Setser (CFR) on petrodollar recycling, SWP Berlin on Gulf SWF foreign policy, "
+               "and Treasury TIC data on foreign Treasury holdings provide the empirical foundation for Pipe 1.")
+ 
+ 
+# ── TAB 10: PIPE 2 — SHADOW BANKING ──
+with tab10:
+    st.header("🔧 Structural Vulnerability Map")
+    st.markdown("### Pipe 2: Shadow Banking")
+ 
+    st.markdown("""
+    <div style='padding:14px;background:#261f14;border-left:4px solid #c8a84a;border-radius:8px;margin:8px 0'>
+    <strong style='color:#c8a84a'>This is NOT a probability model.</strong><br>
+    <span style='color:#b09a6e'>The Recession Radar tells you <em>probability</em> of a cyclical recession.<br>
+    The Vulnerability Map tells you <em>transmission mechanisms</em> — how any shock propagates
+    through hidden pipes that probability models can't see.<br><br>
+    <em>Tooze insight: Crises don't come through the door economists watch.
+    They come through the plumbing economists don't have models for.</em></span>
+    </div>
+    """, unsafe_allow_html=True)
+ 
+    # Pipe 2 current indicators (hardcoded current readings)
+    pipe2_indicators = [
+        {
+            "key": "bdc_discount",
+            "label": "BDC discount to NAV",
+            "value": 17.0, "unit": "%",
+            "thresholds": [0, 5, 12, 20, 30],  # healthy, watch, stressed, at-risk, rupture
+            "ref_2007": "ABCP rates spiking Aug 2007",
+            "why": "Public BDCs trade daily. 17% discount = market disbelieves private NAVs. Same pattern as 2007 when ABCP spreads spiked while subprime MBS still looked fine.",
+        },
+        {
+            "key": "pik",
+            "label": "Payment-in-Kind income share",
+            "value": 8.0, "unit": "%",
+            "thresholds": [3, 5, 8, 12, 18],
+            "ref_2007": "Teaser-rate resets on subprime ARMs",
+            "why": "When borrowers can't pay cash interest, they roll it into principal. Debt compounds invisibly. Delays but doesn't prevent default.",
+        },
+        {
+            "key": "tech_conc",
+            "label": "PC tech/business services exposure",
+            "value": 42.0, "unit": "%",
+            "thresholds": [25, 32, 40, 50, 60],
+            "ref_2007": "Subprime concentration in CA/FL/AZ/NV",
+            "why": "21% software + 21% other tech/business services. Correlated AI disruption risk across entire PC book.",
+        },
+        {
+            "key": "true_default",
+            "label": "True PC default rate (w/ LMEs)",
+            "value": 5.8, "unit": "%",
+            "thresholds": [2, 3.5, 5, 8, 12],
+            "ref_2007": "Subprime delinquency rate mid-2007",
+            "why": "Headline rate <2%. True rate 5.8% including LMEs. 71% of LME'd companies default within 3 years.",
+        },
+        {
+            "key": "evergreen",
+            "label": "Evergreen fund redemption pressure",
+            "value": 65, "unit": "/100",
+            "thresholds": [20, 35, 55, 75, 90],
+            "ref_2007": "BNP Paribas fund freeze Aug 2007",
+            "why": "5%/quarter redemption caps. JPM forecasts elevated redemptions through H1 2026. Gating = panic trigger.",
+        },
+        {
+            "key": "sub_lines",
+            "label": "Subscription line + NAV financing",
+            "value": 72, "unit": "/100",
+            "thresholds": [20, 40, 60, 80, 95],
+            "ref_2007": "Bank-sponsored SIV exposure",
+            "why": "Banks lending to PC funds = leverage on leverage. Exact 2007 SIV structure. 17Capital raised largest-ever NAV financing fund 2025.",
+        },
+        {
+            "key": "neg_fcf",
+            "label": "PC borrowers w/ negative FCF",
+            "value": 40.0, "unit": "%",
+            "thresholds": [15, 25, 35, 45, 55],
+            "ref_2007": "Subprime borrowers who couldn't afford reset rates",
+            "why": "IMF: 40% of PC borrowers have negative free cash flow. Zombies surviving on lender forbearance.",
+        },
+        {
+            "key": "mmf",
+            "label": "MMF exposure to PC paper",
+            "value": 45, "unit": "/100",
+            "thresholds": [20, 35, 55, 75, 90],
+            "ref_2007": "MMF exposure to ABCP (direct parallel)",
+            "why": "Short-term savings funding long-term illiquid credit. Same structure as 2007. Data opaque — that IS the signal.",
+        },
+    ]
+ 
+    def score_pipe2(value, thresholds):
+        h, w, s, ar, r = thresholds
+        if value <= h: return 10
+        elif value <= w: return 10 + (value - h) / (w - h) * 20
+        elif value <= s: return 30 + (value - w) / (s - w) * 20
+        elif value <= ar: return 50 + (value - s) / (ar - s) * 25
+        elif value <= r: return 75 + (value - ar) / (r - ar) * 20
+        else: return 95
+ 
+    def status_label(score):
+        if score < 30: return "HEALTHY", "#8fb840"
+        elif score < 50: return "WATCH", "#c8a84a"
+        elif score < 70: return "STRESSED", "#d4614a"
+        elif score < 85: return "AT-RISK", "#d4614a"
+        else: return "ACTIVE-RUPTURE", "#d4614a"
+ 
+    # Compute all scores
+    for ind in pipe2_indicators:
+        ind["score"] = score_pipe2(ind["value"], ind["thresholds"])
+        ind["status"], ind["color"] = status_label(ind["score"])
+ 
+    # Overall pipe status
+    scores = [ind["score"] for ind in pipe2_indicators]
+    max_score = max(scores)
+    mean_score = np.mean(scores)
+    above_75 = sum(1 for s in scores if s >= 75)
+    above_50 = sum(1 for s in scores if s >= 50)
+ 
+    if max_score >= 90:
+        overall_status = "ACTIVE-RUPTURE"
+        overall_color = "#d4614a"
+        overall_desc = "At least one indicator shows active failure mode"
+    elif above_75 >= 2:
+        overall_status = "AT-RISK"
+        overall_color = "#d4614a"
+        overall_desc = "Multiple indicators at rupture threshold — cascade risk"
+    elif above_50 >= 3 or max_score >= 75:
+        overall_status = "STRESSED"
+        overall_color = "#d4614a"
+        overall_desc = "Multiple indicators stressed or one at-risk"
+    elif above_50 >= 1 or mean_score >= 40:
+        overall_status = "WATCH"
+        overall_color = "#c8a84a"
+        overall_desc = "Early warning signals active, not yet rupture-consistent"
+    else:
+        overall_status = "HEALTHY"
+        overall_color = "#8fb840"
+        overall_desc = "Pipe functioning normally"
+ 
+    # Hero status
+    st.markdown(f"""
+    <div style='padding:24px;background:{overall_color}22;border:2px solid {overall_color};border-radius:14px;text-align:center;margin:16px 0'>
+    <div style='color:#b09a6e;font-size:14px;margin-bottom:8px'>OVERALL PIPE STATUS</div>
+    <h1 style='color:{overall_color};margin:0;font-size:42px'>{overall_status}</h1>
+    <div style='color:#b09a6e;margin-top:8px'>{overall_desc}</div>
+    </div>
+    """, unsafe_allow_html=True)
+ 
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Stressed (≥50)", f"{above_50}/8")
+    col2.metric("At-Risk (≥75)", f"{above_75}/8")
+    col3.metric("Max Score", f"{max_score:.0f}/100")
+ 
+    st.markdown("### Indicator Status Table")
+    st.caption("Each indicator has a direct 2007 analog. This is the Tooze framework applied to 2026.")
+ 
+    df = pd.DataFrame([
+        {
+            "Indicator": ind["label"],
+            "Value": f"{ind['value']}{ind['unit']}",
+            "Score": f"{ind['score']:.0f}/100",
+            "Status": ind["status"],
+            "2007 Equivalent": ind["ref_2007"],
+        }
+        for ind in pipe2_indicators
+    ])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+ 
+    # Detailed reasoning
+    st.markdown("### Why Each Indicator Matters")
+    for ind in pipe2_indicators:
+        with st.expander(f"{ind['label']} — {ind['status']} ({ind['value']}{ind['unit']})"):
+            st.markdown(f"**2007 Equivalent:** {ind['ref_2007']}")
+            st.markdown(f"**Why it matters:** {ind['why']}")
+            st.caption(f"Threshold scale — Healthy ≤{ind['thresholds'][0]}{ind['unit']} | Watch ≤{ind['thresholds'][1]}{ind['unit']} | Stressed ≤{ind['thresholds'][2]}{ind['unit']} | At-risk ≤{ind['thresholds'][3]}{ind['unit']} | Rupture ≤{ind['thresholds'][4]}{ind['unit']}")
+ 
+    # Transmission mechanisms
+    st.markdown("### Transmission Mechanisms — How a Pipe Rupture Propagates")
+ 
+    with st.expander("🌊 Scenario 1: Evergreen Fund Gating Cascade"):
+        st.markdown("""
+        **Historical analog:** BNP Paribas freezes 3 funds, Aug 9 2007
+        **Timeline to US consumer:** 6-18 months
+ 
+        **Sequence:**
+        1. Investor redemption requests exceed 5% quarterly cap
+        2. Fund gates (or side-pockets illiquid assets)
+        3. Gating becomes public → other evergreen investors panic
+        4. Broader evergreen redemptions → mass gating
+        5. Funds forced to sell liquid assets to meet remaining withdrawals
+        6. Liquid sleeve sales → public credit spread widening
+        7. Spread widening hits BDC NAVs → public market confirms stress
+        8. Banks with subscription line exposure reduce lines
+        9. Funds unable to deploy new capital or refinance
+        10. Zombie borrowers (40% negative FCF) default en masse
+        """)
+ 
+    with st.expander("📉 Scenario 2: BDC Discount Repricing Cascade"):
+        st.markdown("""
+        **Historical analog:** Summer 2015 BDC discount event (smaller scale)
+        **Timeline to US consumer:** 9-15 months
+ 
+        **Sequence:**
+        1. BDC discount to NAV widens further (currently 17%)
+        2. Wealth channel investors sell BDC positions
+        3. BDC share prices drop → forced deleveraging
+        4. BDCs sell loan positions → pressure on PC asset prices
+        5. Private NAVs forced to mark down
+        6. Evergreen fund NAVs drop → redemption surge
+        7. See Scenario 1
+        """)
+ 
+    with st.expander("🏦 Scenario 3: Bank Subscription Line Retraction (Fastest)"):
+        st.markdown("""
+        **Historical analog:** 2007 conduit withdrawal from ABCP market
+        **Timeline to US consumer:** 3-9 months (fastest transmission)
+ 
+        **Sequence:**
+        1. Bank stress from CRE or other exposure increases
+        2. Banks reduce subscription lines to PC funds
+        3. PC funds lose ability to bridge capital calls
+        4. Funds must draw from LPs faster than expected
+        5. LPs (pensions, endowments) under pressure
+        6. Some LPs default on capital commitments
+        7. Funds forced to sell assets at fire-sale prices
+        8. Zombie borrower defaults accelerate
+        """)
+ 
+    st.markdown("### Who Gets Hit First (Transmission Chain)")
+    transmission_order = [
+        "PC borrowers with negative FCF (40% of book) — **immediate**",
+        "Subprime CC borrowers (already K-shaped stress) — **within 3 months**",
+        "Small business loans via non-bank lenders — **3-6 months**",
+        "Regional banks with CRE + subscription line exposure — **3-9 months**",
+        "Tech/software sector layoffs (42% of PC book) — **6-12 months**",
+        "Broader consumer via tech layoffs + small biz closures — **6-18 months**",
+    ]
+    for i, target in enumerate(transmission_order, 1):
+        st.markdown(f"{i}. {target}")
+ 
+    st.markdown("### Early Warning Signals to Watch Daily")
+    signals = [
+        "BDC discount to NAV widening beyond 20% (currently 17%)",
+        "PIK income share rising above 10% at major BDCs",
+        "Evergreen fund gating events (any major manager)",
+        "Subscription line volume declines in bank earnings reports",
+        "PC default rate (Fitch) crossing 7%",
+        "Specialty finance fund closures or manager exits",
+        "Secondary market PC loan prices below 90 cents on dollar",
+    ]
+    for sig in signals:
+        st.markdown(f"- {sig}")
+ 
+    # Critical integration explanation
+    st.markdown("### 🔗 How This Integrates with Recession Radar")
+ 
+    st.markdown(f"""
+    <div style='padding:16px;background:#261f14;border-left:4px solid #c8a84a;border-radius:8px;margin:8px 0'>
+    <strong style='color:#c8a84a'>Two frameworks, two questions, two answers:</strong><br><br>
+ 
+    <strong style='color:#f2e8d0'>Recession Radar says:</strong>
+    <span style='color:#b09a6e'>{ml_p*100:.0f}% cyclical probability (market-weighted)<br>
+    35-45% when adjusted for LSI + CSI + CFHI fundamentals</span><br><br>
+ 
+    <strong style='color:#f2e8d0'>Pipe 2 Shadow Banking says:</strong>
+    <span style='color:{overall_color}'>{overall_status}</span><br>
+    <span style='color:#b09a6e'>{above_50}/8 indicators stressed. Rupture mechanisms present.</span><br><br>
+ 
+    <strong style='color:#c8a84a'>Combined decision framework:</strong><br>
+    <span style='color:#b09a6e'>Even at low cyclical probability, a STRESSED pipe means any shock
+    amplifies significantly. The traditional playbook (Fed cuts + fiscal response) may not
+    work for Pipe 2 transmission because private credit losses don't appear on bank balance
+    sheets the Fed can backstop.</span><br><br>
+ 
+    <strong style='color:#d4614a'>Position for asymmetric downside risk</strong>
+    <span style='color:#b09a6e'> even when central probability is low, because the plumbing
+    cannot absorb a cyclical shock without cascading.</span>
+    </div>
+    """, unsafe_allow_html=True)
+ 
+    st.warning("""
+    **Why Recession Radar can't see this:** Probability models trained on 2000, 2008, 2020
+    don't have private credit in their feature set because it didn't exist at scale in those
+    periods. The thermometer can't diagnose a broken pipe. This is NOT a model failure —
+    it's a category failure. You need a separate diagnostic tool for the plumbing.
+    """)
+ 
+    st.caption("Framework inspired by Adam Tooze, *Crashed* (2018). "
+               "Tooze's central insight: the 2008 crisis wasn't caused by the mechanisms "
+               "the smartest economists in 2006 were watching. It came through the "
+               "transnational banking plumbing they had no model for. Pipes 1-4 of the "
+               "Structural Vulnerability Map are designed to map today's equivalent pipes.")
+ 
+# ── TAB 11: ABOUT ──
+with tab11:
     st.header("About This Model")
  
     st.markdown("""
